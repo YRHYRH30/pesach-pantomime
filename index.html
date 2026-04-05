@@ -358,7 +358,13 @@ body::before {
     10 סרטונים &bull; גבר חרדי על במה &bull; בלי מילים &bull; בלי אביזרים<br>
     כתבו את התשובה &bull; 100 נקודות על כל תשובה נכונה
   </div>
-  <button class="btn-main" onclick="startGame()">🎬 יאללה, מתחילים!</button>
+  <div id="preloadStatus" style="margin-bottom:18px;">
+    <div style="font-size:.95rem;color:var(--gold-light);opacity:.8;margin-bottom:6px;" id="preloadText">טוען סרטונים...</div>
+    <div style="width:280px;height:6px;background:rgba(255,255,255,.1);border-radius:10px;margin:0 auto;overflow:hidden;">
+      <div id="preloadBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:10px;transition:width .3s;"></div>
+    </div>
+  </div>
+  <button class="btn-main" id="startBtn" onclick="startGame()" disabled style="opacity:.4;cursor:wait;">🎬 י��ללה, מתחילים!</button>
 </div>
 
 <!-- GAME -->
@@ -487,19 +493,49 @@ function normalize(s) {
   return s.trim().replace(/['"״׳\-–—]/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
-// Video cache - preload into blob URLs for instant playback
+// Video cache - preload ALL into blob URLs on page load
 const videoCache = {};
+let preloadedCount = 0;
+const totalVideos = questions.length;
 
-function preloadVideo(url) {
-  if (videoCache[url]) return;
-  videoCache[url] = 'loading';
-  fetch(url)
-    .then(r => r.blob())
-    .then(blob => {
-      videoCache[url] = URL.createObjectURL(blob);
-    })
-    .catch(() => { videoCache[url] = url; }); // fallback to direct URL
+function preloadAllVideos() {
+  questions.forEach(q => {
+    fetch(q.url)
+      .then(r => r.blob())
+      .then(blob => {
+        videoCache[q.url] = URL.createObjectURL(blob);
+        preloadedCount++;
+        updatePreloadUI();
+      })
+      .catch(() => {
+        videoCache[q.url] = q.url;
+        preloadedCount++;
+        updatePreloadUI();
+      });
+  });
 }
+
+function updatePreloadUI() {
+  const pct = Math.round((preloadedCount / totalVideos) * 100);
+  const bar = document.getElementById('preloadBar');
+  const txt = document.getElementById('preloadText');
+  if (bar) bar.style.width = pct + '%';
+  if (txt) txt.textContent = `��וען סרטונים... ${preloadedCount}/${totalVideos}`;
+
+  if (preloadedCount >= totalVideos) {
+    if (txt) txt.textContent = '✓ כל הסרטונים מוכנים!';
+    const btn = document.getElementById('startBtn');
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+  }
+  // Enable button early after 3 videos loaded
+  if (preloadedCount >= 3) {
+    const btn = document.getElementById('startBtn');
+    if (btn && btn.disabled) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+  }
+}
+
+// Start preloading immediately on page load
+preloadAllVideos();
 
 function startGame() {
   shuffled = shuffle(questions);
@@ -507,11 +543,6 @@ function startGame() {
   document.getElementById('welcome').style.display = 'none';
   document.getElementById('results').style.display = 'none';
   document.getElementById('game').style.display = 'block';
-
-  // Preload first 3 videos immediately
-  for (let i = 0; i < Math.min(3, shuffled.length); i++) {
-    preloadVideo(shuffled[i].url);
-  }
   loadQ();
 }
 
@@ -526,28 +557,29 @@ function loadQ() {
 
   const vid = document.getElementById('vid');
   const spinner = document.getElementById('loadSpinner');
-  spinner.classList.remove('hidden');
 
   // Use cached blob URL if ready, otherwise direct URL
   const cached = videoCache[q.url];
   const src = (cached && cached !== 'loading') ? cached : q.url;
-  vid.src = src;
-  vid.load();
-  vid.pause();
-  vid.oncanplaythrough = () => {
+
+  if (cached && cached !== 'loading') {
+    // Already in cache - instant load, no spinner
     spinner.classList.add('hidden');
-    vid.oncanplaythrough = null;
-  };
-  // Fallback hide spinner after 4s
-  setTimeout(() => spinner.classList.add('hidden'), 4000);
+    vid.src = src;
+    vid.load();
+    vid.pause();
+  } else {
+    // Still loading - show spinner briefly
+    spinner.classList.remove('hidden');
+    vid.src = q.url;
+    vid.load();
+    vid.pause();
+    vid.oncanplaythrough = () => { spinner.classList.add('hidden'); vid.oncanplaythrough = null; };
+    setTimeout(() => spinner.classList.add('hidden'), 3000);
+  }
 
   document.getElementById('playOverlay').classList.remove('hidden');
   clearInterval(timerInt);
-
-  // Preload next 3 videos
-  for (let i = 1; i <= 3; i++) {
-    if (cur + i < shuffled.length) preloadVideo(shuffled[cur + i].url);
-  }
 
   document.getElementById('ansInput').value = '';
   document.getElementById('ansInput').disabled = false;
