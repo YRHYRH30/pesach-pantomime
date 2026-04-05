@@ -487,12 +487,31 @@ function normalize(s) {
   return s.trim().replace(/['"״׳\-–—]/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
+// Video cache - preload into blob URLs for instant playback
+const videoCache = {};
+
+function preloadVideo(url) {
+  if (videoCache[url]) return;
+  videoCache[url] = 'loading';
+  fetch(url)
+    .then(r => r.blob())
+    .then(blob => {
+      videoCache[url] = URL.createObjectURL(blob);
+    })
+    .catch(() => { videoCache[url] = url; }); // fallback to direct URL
+}
+
 function startGame() {
   shuffled = shuffle(questions);
   cur = 0; score = 0; answered = false; userAnswers = [];
   document.getElementById('welcome').style.display = 'none';
   document.getElementById('results').style.display = 'none';
   document.getElementById('game').style.display = 'block';
+
+  // Preload first 3 videos immediately
+  for (let i = 0; i < Math.min(3, shuffled.length); i++) {
+    preloadVideo(shuffled[i].url);
+  }
   loadQ();
 }
 
@@ -508,25 +527,26 @@ function loadQ() {
   const vid = document.getElementById('vid');
   const spinner = document.getElementById('loadSpinner');
   spinner.classList.remove('hidden');
-  vid.src = q.url;
+
+  // Use cached blob URL if ready, otherwise direct URL
+  const cached = videoCache[q.url];
+  const src = (cached && cached !== 'loading') ? cached : q.url;
+  vid.src = src;
   vid.load();
   vid.pause();
   vid.oncanplaythrough = () => {
     spinner.classList.add('hidden');
     vid.oncanplaythrough = null;
   };
-  // Fallback hide spinner after 5s
-  setTimeout(() => spinner.classList.add('hidden'), 5000);
+  // Fallback hide spinner after 4s
+  setTimeout(() => spinner.classList.add('hidden'), 4000);
 
   document.getElementById('playOverlay').classList.remove('hidden');
   clearInterval(timerInt);
 
-  // Preload next video
-  if (cur + 1 < shuffled.length) {
-    const link = document.createElement('link');
-    link.rel = 'prefetch';
-    link.href = shuffled[cur + 1].url;
-    document.head.appendChild(link);
+  // Preload next 3 videos
+  for (let i = 1; i <= 3; i++) {
+    if (cur + i < shuffled.length) preloadVideo(shuffled[cur + i].url);
   }
 
   document.getElementById('ansInput').value = '';
